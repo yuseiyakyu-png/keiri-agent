@@ -1,0 +1,21 @@
+{
+  "name": "keiri-agent",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "経理AIエージェント MVP: 未仕訳のうちルールと完全一致するものだけを自動仕訳登録し、Slackに毎朝報告する",
+  "scripts": {
+    "dev": "netlify dev",
+    "oauth-setup": "tsx scripts/oauth-setup.ts"
+  },
+  "dependencies": {
+    "@netlify/functions": "^3.0.0",
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.0",
+    "netlify-cli": "^17.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
