@@ -21,6 +21,14 @@ create table if not exists freee_tokens (
   constraint single_row check (id = 1)
 );
 
+-- 登録済みのwallet_txn_idを記録する(freeeの仕様上、仕訳登録後もwallet_txn.statusが
+-- 「未処理」のままになる=公開APIでは連携できない既知の制限があるため、
+-- こちら側で「もう登録した明細」を覚えておいて二重登録を防ぐ)
+create table if not exists registered_wallet_txns (
+  wallet_txn_id bigint primary key,
+  registered_at timestamptz not null default now()
+);
+
 -- 実行ログ(毎朝の結果を記録。つまずきメモ・提出物の裏付けにもなる)
 create table if not exists run_logs (
   id bigint generated always as identity primary key,

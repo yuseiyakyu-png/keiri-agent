@@ -1,6 +1,6 @@
 import { getSupabase } from "./supabase";
 import { getValidAccessToken, fetchUnmatchedWalletTxns, findAccountItemId, registerDeal } from "./freee";
-import { matchExact, type MatchingRule } from "./match";
+import { matchExact, type MatchingRule, type MatchedItem } from "./match";
 import { postReportToSlack } from "./slack";
 
 export interface RunResult {
@@ -30,11 +30,27 @@ export async function runDailyJob(): Promise<RunResult> {
     const rules = (rulesData ?? []) as MatchingRule[];
 
     const txns = await fetchUnmatchedWalletTxns(accessToken, companyId);
-    const matched = matchExact(txns, rules);
+    const allMatched = matchExact(txns, rules);
+
+    // freeeの仕様上、仕訳登録後もwallet_txn.statusが「未処理」のまま変わらない
+    // (公開APIでの連携不可という既知の制限)ため、こちら側のSupabaseで
+    // 「もう登録した明細id」を記録し、二重登録を防ぐ。
+    const matchedIds = allMatched.map((m) => m.txn.id);
+    let alreadyRegisteredIds = new Set<number>();
+    if (matchedIds.length > 0) {
+      const { data: alreadyData, error: alreadyError } = await supabase
+        .from("registered_wallet_txns")
+        .select("wallet_txn_id")
+        .in("wallet_txn_id", matchedIds);
+      if (alreadyError) throw alreadyError;
+      alreadyRegisteredIds = new Set((alreadyData ?? []).map((r: any) => r.wallet_txn_id));
+    }
+    const matched = allMatched.filter((m) => !alreadyRegisteredIds.has(m.txn.id));
 
     // 勘定科目名 -> account_item_id のキャッシュ(同じ科目を何度も引かないため)
     const accountItemIdCache = new Map<string, number | null>();
     const registeredItems: RunResult["registeredItems"] = [];
+    const registeredMatchedItems: MatchedItem[] = [];
 
     for (const m of matched) {
       let accountItemId = accountItemIdCache.get(m.rule.account_item_name);
@@ -48,14 +64,14 @@ export async function runDailyJob(): Promise<RunResult> {
         continue;
       }
       await registerDeal(accessToken, companyId, m.txn, accountItemId);
+      await supabase
+        .from("registered_wallet_txns")
+        .upsert({ wallet_txn_id: m.txn.id }, { onConflict: "wallet_txn_id" });
       registeredItems.push({ description: m.txn.description, account_item_name: m.rule.account_item_name });
+      registeredMatchedItems.push(m);
     }
 
-    await postReportToSlack(
-      slackWebhook,
-      txns.length,
-      matched.filter((m) => registeredItems.some((r) => r.description === m.txn.description))
-    );
+    await postReportToSlack(slackWebhook, txns.length, registeredMatchedItems);
 
     await supabase.from("run_logs").insert({
       total_unmatched: txns.length,
